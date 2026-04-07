@@ -1,6 +1,7 @@
 import java.awt.*;
 import java.awt.event.KeyEvent;
 import java.awt.event.KeyListener;
+import java.awr.image.BufferedImage;
 import javax.swing.*;
 
 class Game extends JPanel implements Runnable, KeyListener {
@@ -17,6 +18,11 @@ class Game extends JPanel implements Runnable, KeyListener {
     private int p2RoundsWon = 0;
     private int restartTimer = 0;
 
+    // Selecting Character *
+    private int selectingPlayer = 1;
+    private int p1Selection = 0;
+    private int p2Selection = 1;
+
     // Objects
     private Player player1;
     private Player player2;
@@ -27,6 +33,10 @@ class Game extends JPanel implements Runnable, KeyListener {
     private boolean wPressed, aPressed, sPressed, dPressed;
     private boolean upPressed, leftPressed, downPressed, rightPressed;
 
+    // Avater Data *
+    private String[] avatarName = {"Blue Male", "Red Male", "Purple Female", "Pink Female"};
+    private String [] avatarFiles = {"char_blue_m.png", "char_red_m.png", "char_purp_f.png", "char_pink_f.png"};
+
     public Game() {
         setPreferredSize(new Dimension(WIDTH, HEIGHT));
         setBackground(Color.DARK_GRAY);
@@ -36,7 +46,8 @@ class Game extends JPanel implements Runnable, KeyListener {
         startNewMatch();
     }
 
-    public void startNewMatch() {
+    // accept character selections *
+    public void startNewMatch(int p1CharIndex, int p2CharIndex) {
         // Initialize level
         currentLevel = new Level("Dojo", 250);
 
@@ -390,15 +401,6 @@ class Item {
         isCollected = true;
         // Example logic: if itemType.equals("Speed"), boost player.speed
     }
-
-    public void removeEffect(Player player) { 
-        // Revert stats
-    }
-    
-    public boolean checkCollision(Player player) { 
-        return false; // Future AABB collision logic here
-    }
-}
 
     public void removeEffect(Player player) { 
         // Revert stats
