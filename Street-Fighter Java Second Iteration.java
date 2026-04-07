@@ -399,3 +399,12 @@ class Item {
         return false; // Future AABB collision logic here
     }
 }
+
+    public void removeEffect(Player player) { 
+        // Revert stats
+    }
+    
+    public boolean checkCollision(Player player) { 
+        return false; // Future AABB collision logic here
+    }
+}
