@@ -9,3 +9,6 @@ https://github.com/calebriggs1120/Intermediate-Programming-Project/blob/main/Str
 
 Latest working code for the game; includes core mechanics but needs graphics updates, a timer displayed, and a puase button:
 https://github.com/calebriggs1120/Intermediate-Programming-Project/blob/main/Street-Fighter%20Java%20Second%20Iteration.java
+
+Check Case:
+The best working type so far
