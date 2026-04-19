@@ -11,7 +11,10 @@ Latest working code for the game; includes core mechanics but needs graphics upd
 https://github.com/calebriggs1120/Intermediate-Programming-Project/blob/main/Street-Fighter%20Java%20Second%20Iteration.java
 
 Check Case:
-The best working type so far
+The best working type so far (4/8/2026)
 
 Submit this for PD3:
 https://github.com/calebriggs1120/Intermediate-Programming-Project/blob/main/Runtime%20Rumble%20Folder%20-%20Copy.zip
+
+
+Latest Code: (one labeled "4.19")
