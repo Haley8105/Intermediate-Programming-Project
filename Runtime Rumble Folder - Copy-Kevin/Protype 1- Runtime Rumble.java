@@ -1,0 +1,744 @@
+import java.awt.*;
+import java.awt.event.KeyEvent;
+import java.awt.event.KeyListener;
+import java.io.File;
+import java.io.IOException;
+import javax.imageio.ImageIO;
+import javax.sound.sampled.*;
+import javax.swing.*;
+
+class Game extends JPanel implements Runnable, KeyListener {
+    // Window constants
+    private static final int WIDTH = 800;
+    private static final int HEIGHT = 400;
+
+    // Game state tracking
+    private Thread gameThread;
+    private volatile boolean isRunning = true; // Thread kill switch
+    private String gameState = "PLAYING"; 
+    private int timer = 60; 
+    private int frameCount = 0; 
+    private int maxRounds = 3;
+    private int p1RoundsWon = 0;
+    private int p2RoundsWon = 0;
+    private int restartTimer = 0;
+
+    // Background Image
+    private Image backgroundImage = null;
+
+    // Objects
+    private Player player1;
+    private Player player2;
+    private Level currentLevel;
+
+    // Keyboard state tracking
+    private boolean wPressed, aPressed, sPressed, dPressed;
+    private boolean upPressed, leftPressed, downPressed, rightPressed;
+    private boolean isPaused = false;
+
+    private JFrame frame; // Reference to the game window
+    private String levelName;
+    private boolean isTournament = false;
+    private int[] playerWins = new int[2];
+    private String[] stageOrder = {"Dojo", "Red Arena", "Blue Arena"};
+    private int currentStage = 0;
+
+    private static Clip jumpClip, punchClip, kickClip, backgroundMusicClip;
+
+    public Game(String selection) {
+        if (selection.equals("Best of Three")) {
+            isTournament = true;
+            levelName = "Dojo";
+        } else {
+            levelName = selection;
+        }
+        Dimension screenSize = Toolkit.getDefaultToolkit().getScreenSize();
+        setPreferredSize(screenSize);
+        setBackground(getBackgroundColor(levelName)); 
+        setFocusable(true);
+        addKeyListener(this);
+
+        if (levelName.equals("Dojo")) {
+            setBackgroundImage("Game background.jpg");
+        }
+
+        loadSounds();
+        startNewMatch();
+    }
+
+    private void nextStage() {
+        currentStage++;
+        if (currentStage < 3) {
+            levelName = stageOrder[currentStage];
+            setBackground(getBackgroundColor(levelName));
+            if (levelName.equals("Dojo")) {
+                setBackgroundImage("Game background.jpg");
+            } else {
+                backgroundImage = null;
+            }
+            gameState = "PLAYING";
+            restartTimer = 0;
+            startNewMatch();
+        }
+    }
+
+    private Color getBackgroundColor(String levelName) {
+        switch (levelName) {
+            case "Red Arena": return Color.RED;
+            case "Blue Arena": return Color.BLUE;
+            default: return new Color(173, 216, 230); // Light blue for Dojo
+        }
+    }
+
+    public void setFrame(JFrame f) {
+        this.frame = f;
+    }
+
+    public void setBackgroundImage(String imagePath) {
+        try {
+            File imgFile = new File(imagePath);
+            if (!imgFile.isAbsolute()) {
+                imgFile = new File("c:\\Users\\kevin\\OneDrive - University of North Carolina at Charlotte\\Desktop\\Runtime Rumble Folder - Copy-Kevin\\" + imagePath);
+            }
+            backgroundImage = ImageIO.read(imgFile);
+        } catch (IOException e) {
+            System.err.println("Could not load background image at " + imagePath + ". Defaulting to light blue.");
+            backgroundImage = null;
+        }
+    }
+
+    public void loadSounds() {
+        String basePath = "c:\\Users\\kevin\\OneDrive - University of North Carolina at Charlotte\\Desktop\\Runtime Rumble Folder - Copy-Kevin\\";
+        try {
+            AudioInputStream audioInputStream = AudioSystem.getAudioInputStream(new File(basePath + "wolfy_sanic-jump-15984 (1).wav"));
+            jumpClip = AudioSystem.getClip();
+            jumpClip.open(audioInputStream);
+        } catch (Exception e) {
+            System.err.println("Could not load jump sound.");
+        }
+        try {
+            AudioInputStream audioInputStream = AudioSystem.getAudioInputStream(new File(basePath + "soraatwod-punch-416719.wav"));
+            punchClip = AudioSystem.getClip();
+            punchClip.open(audioInputStream);
+        } catch (Exception e) {
+            System.err.println("Could not load punch sound.");
+        }
+        try {
+            AudioInputStream audioInputStream = AudioSystem.getAudioInputStream(new File(basePath + "alec_koff-epic-fight-487416.wav"));
+            backgroundMusicClip = AudioSystem.getClip();
+            backgroundMusicClip.open(audioInputStream);
+        } catch (Exception e) {
+            System.err.println("Could not load background music.");
+        }
+
+    }
+
+    public static void playJumpSound() {
+        if (jumpClip != null) {
+            jumpClip.setFramePosition(0);
+            jumpClip.start();
+        }
+    }
+
+    public static void playPunchSound() {
+        if (punchClip != null) {
+            punchClip.setFramePosition(0);
+            punchClip.start();
+        }
+    }
+
+    public static void playBackgroundMusic() {
+        if (backgroundMusicClip != null) {
+            backgroundMusicClip.setFramePosition(0);
+            backgroundMusicClip.loop(Clip.LOOP_CONTINUOUSLY);
+        }
+    }
+
+    public static void stopBackgroundMusic() {
+        if (backgroundMusicClip != null) {
+            backgroundMusicClip.stop();
+        }
+    }
+
+
+
+    public void startNewMatch() {
+        Dimension screenSize = Toolkit.getDefaultToolkit().getScreenSize();
+        int groundHeight = screenSize.height / 8;
+        int groundY;
+        if (levelName.equals("Dojo")) {
+            groundY = screenSize.height - groundHeight;
+        } else if (levelName.equals("Red Arena")) {
+            groundY = screenSize.height - groundHeight - 100; // Higher ground
+        } else { // Blue Arena
+            groundY = screenSize.height - groundHeight + 50; // Lower ground
+        }
+        currentLevel = new Level(levelName, groundY);
+
+        int playerWidth = 100;
+        player1 = new Player(100, 6, 100, currentLevel.getGroundLevelY() - 200, playerWidth, 200, "RED", true);
+        int player2StartX = screenSize.width - 100 - playerWidth;
+        player2 = new Player(100, 6, player2StartX, currentLevel.getGroundLevelY() - 200, playerWidth, 200, "BLUE", false);
+        
+        gameState = "PLAYING";
+        restartTimer = 0;
+        timer = 60; 
+        frameCount = 0; 
+    }
+
+    public void startGame() {
+        gameThread = new Thread(this);
+        gameThread.start();
+    }
+
+    @Override
+    public void run() {
+        playBackgroundMusic();
+        while (isRunning) { // Kills the thread safely when isRunning is false
+            update();
+            repaint();
+            try {
+                Thread.sleep(16);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+                break;
+            }
+        }
+        stopBackgroundMusic();
+    }
+
+    private void handleWin(int winnerId) {
+        if (isTournament) {
+            playerWins[winnerId - 1]++;
+            
+            if (playerWins[winnerId - 1] >= 2) {
+                gameState = (winnerId == 1) ? "P1_GRAND_WIN" : "P2_GRAND_WIN";
+            } else {
+                gameState = (winnerId == 1) ? "P1_WINS" : "P2_WINS";
+            }
+        } else {
+            gameState = (winnerId == 1) ? "P1_WINS" : "P2_WINS";
+        }
+        restartTimer = 0;
+    }
+
+    public void update() {
+        if (isPaused) {
+            return;
+        }
+
+        if (!gameState.equals("PLAYING")) {
+            restartTimer++;
+
+            if (gameState.equals("P1_GRAND_WIN") || gameState.equals("P2_GRAND_WIN")) {
+                if (restartTimer > 240) {
+                    isRunning = false; // Kill the background thread
+                    frame.dispose(); // Close game window
+                    createMenu().setVisible(true); // Return to menu
+                }
+                return;
+            }
+
+            if (restartTimer > 180) {
+                if (isTournament && (gameState.equals("P1_WINS") || gameState.equals("P2_WINS"))) {
+                    nextStage();
+                } else {
+                    startNewMatch();
+                }
+            }
+            return;
+        }
+
+        frameCount++;
+        if (frameCount >= 60) {
+            timer--;
+            frameCount = 0;
+        }
+        
+        if (timer <= 0) {
+            if (player1.getHealth() > player2.getHealth()) {
+                handleWin(1);
+            } else if (player2.getHealth() > player1.getHealth()) {
+                handleWin(2);
+            } else {
+                gameState = "DRAW"; // Draws don't award points
+                restartTimer = 0;
+            }
+        }
+
+        if (aPressed) player1.move(-player1.getSpeed(), 0);
+        else if (dPressed) player1.move(player1.getSpeed(), 0);
+        if (wPressed) player1.jump();
+        if (sPressed) player1.crouch();
+        else player1.stopCrouch();
+
+        if (leftPressed) player2.move(-player2.getSpeed(), 0);
+        else if (rightPressed) player2.move(player2.getSpeed(), 0);
+        if (upPressed) player2.jump();
+        if (downPressed) player2.crouch();
+        else player2.stopCrouch();
+
+        int floorY = getHeight() - getHeight() / 8;
+        player1.updatePhysics(floorY, getWidth());
+        player2.updatePhysics(floorY, getWidth());
+
+        if (player1.getXPosition() < player2.getXPosition()) {
+            player1.setFacingRight(true);
+            player2.setFacingRight(false);
+        } else {
+            player1.setFacingRight(false);
+            player2.setFacingRight(true);
+        }
+
+        player1.updateAttackTimer();
+        player2.updateAttackTimer();
+
+        checkWinCondition();
+    }
+
+    public void checkWinCondition() {
+        if (timer <= 0) return; 
+
+        if (!player1.isAlive()) {
+            handleWin(2); // Player 2 wins by KO
+        } else if (!player2.isAlive()) {
+            handleWin(1); // Player 1 wins by KO
+        }
+    }
+
+    @Override
+    protected void paintComponent(Graphics g) {
+        super.paintComponent(g); 
+
+        int width = getWidth();
+        int height = getHeight();
+
+        // 1. Draw Background
+        if (backgroundImage != null) {
+            g.drawImage(backgroundImage, 0, 0, width, height, this);
+        }
+
+        // 2. Draw Ground
+        g.setColor(new Color(50, 50, 50));
+        int groundHeight = height / 8;
+        int groundY = height - groundHeight;
+        g.fillRect(0, groundY, width, groundHeight);
+
+        // 3.  Fighters
+        player1.draw(g);
+        player2.draw(g);
+
+        // 4. Draw UI Elements
+        int uiPadding = Math.max(20, width / 50);
+        int barWidth = width / 3;
+        int barHeight = Math.max(24, height / 30);
+        int barY = Math.max(30, height / 20);
+        int leftBarX = uiPadding;
+        int rightBarX = width - uiPadding - barWidth;
+
+        g.setColor(Color.RED);
+        g.fillRect(leftBarX, barY, barWidth, barHeight);
+        g.fillRect(rightBarX, barY, barWidth, barHeight);
+
+        int player1HealthWidth = Math.max(0, Math.min(barWidth, player1.getHealth() * barWidth / 100));
+        int player2HealthWidth = Math.max(0, Math.min(barWidth, player2.getHealth() * barWidth / 100));
+
+        g.setColor(Color.GREEN);
+        g.fillRect(leftBarX, barY, player1HealthWidth, barHeight);
+        g.fillRect(rightBarX + (barWidth - player2HealthWidth), barY, player2HealthWidth, barHeight);
+
+        g.setFont(new Font("Arial", Font.BOLD, Math.max(30, width / 60)));
+        g.setColor(Color.WHITE);
+        g.drawString("Player 1", leftBarX, barY - 6);
+        g.drawString("Player 2", rightBarX + barWidth - g.getFontMetrics().stringWidth("Player 2"), barY - 6);
+
+        g.setFont(new Font("Arial", Font.BOLD, Math.max(48, width / 20)));
+        String timeText = String.format("%02d", Math.max(0, timer)); 
+        FontMetrics metrics = g.getFontMetrics();
+        int timeX = (width - metrics.stringWidth(timeText)) / 2;
+        int timeY = barY + barHeight + Math.max(40, height / 30);
+
+        g.setColor(Color.BLACK);
+        g.drawString(timeText, timeX + 3, timeY + 3);
+        g.setColor(Color.YELLOW);
+        g.drawString(timeText, timeX, timeY);
+
+         // Draw Pause Button (top right corner)
+        int pauseButtonWidth = (int) Math.round(65 * 1.75);
+        int pauseButtonHeight = (int) Math.round(22 * 1.75);
+        int pauseButtonX = width - pauseButtonWidth - 10;
+        int pauseButtonY = (int) (height * 0.10);
+
+        g.setColor(Color.YELLOW);
+        g.fillRect(pauseButtonX, pauseButtonY, pauseButtonWidth, pauseButtonHeight);
+        g.setColor(Color.BLACK);
+        g.drawRect(pauseButtonX, pauseButtonY, pauseButtonWidth, pauseButtonHeight);
+        g.setFont(new Font("Arial", Font.BOLD, 13));
+        String pauseButtonText = "PAUSE (P)";
+        int pauseTextX = pauseButtonX + (pauseButtonWidth - g.getFontMetrics().stringWidth(pauseButtonText)) / 2;
+        int pauseTextY = pauseButtonY + pauseButtonHeight / 2 + g.getFontMetrics().getAscent() / 2 - 2;
+        g.drawString(pauseButtonText, pauseTextX, pauseTextY);
+
+        // Display Pause Menu
+        if (isPaused) {
+            g.setFont(new Font("Arial", Font.BOLD, 48));
+            g.setColor(new Color(0, 0, 0, 200)); // Semi-transparent black
+            g.fillRect(0, 0, width, height);
+            
+            g.setFont(new Font("Arial", Font.BOLD, 48));
+            g.setColor(Color.WHITE);
+            String pauseMsg = "PAUSED";
+            int pauseX = (width - g.getFontMetrics().stringWidth(pauseMsg)) / 2;
+            g.drawString(pauseMsg, pauseX, height / 2 - 50);
+
+            g.setFont(new Font("Arial", Font.BOLD, 20));
+            g.setColor(Color.YELLOW);
+            String resumeMsg = "Press P to Resume";
+            int resumeX = (width - g.getFontMetrics().stringWidth(resumeMsg)) / 2;
+            g.drawString(resumeMsg, resumeX, height / 2 + 20);
+
+            String resetMsg = "Press R to Reset";
+            int resetX = (width - g.getFontMetrics().stringWidth(resetMsg)) / 2;
+            g.drawString(resetMsg, resetX, height / 2 + 60);
+
+            String menuMsg = "Press B to Main Menu";
+            int menuX = (width - g.getFontMetrics().stringWidth(menuMsg)) / 2;
+            g.drawString(menuMsg, menuX, height / 2 + 100);
+            return;
+        }
+
+        if (!gameState.equals("PLAYING")) {
+            g.setFont(new Font("Arial", Font.BOLD, Math.max(64, width / 25)));
+            g.setColor(Color.YELLOW);
+            metrics = g.getFontMetrics();
+            
+            String msg = "DRAW";
+            if (gameState.equals("P1_WINS")) msg = "Player 1 Wins!";
+            if (gameState.equals("P2_WINS")) msg = "Player 2 Wins!";
+            if (gameState.equals("P1_GRAND_WIN")) msg = "Player 1 is the Grand Winner!";
+            if (gameState.equals("P2_GRAND_WIN")) msg = "Player 2 is the Grand Winner!";
+            
+            int x = (width - metrics.stringWidth(msg)) / 2;
+            int y = height / 2;
+            
+            g.setColor(Color.BLACK);
+            g.drawString(msg, x + 3, y + 3);
+            
+            g.setColor(Color.YELLOW);
+            g.drawString(msg, x, y);
+        }
+    }
+
+    @Override
+    public void keyPressed(KeyEvent e) {
+        int key = e.getKeyCode();
+        if (key == KeyEvent.VK_A) aPressed = true;
+        if (key == KeyEvent.VK_D) dPressed = true;
+        if (key == KeyEvent.VK_W) wPressed = true;
+        if (key == KeyEvent.VK_S) sPressed = true;
+        if (key == KeyEvent.VK_F) player1.attack(player2, "Punch");
+        if (key == KeyEvent.VK_G) player1.attack(player2, "Kick");
+
+        if (key == KeyEvent.VK_P && gameState.equals("PLAYING")) {
+            isPaused = !isPaused;
+            return;
+        }
+        if (key == KeyEvent.VK_R && isPaused) {
+            startNewMatch();
+            isPaused = false;
+            return;
+        }
+        if (key == KeyEvent.VK_B && isPaused) {
+            isRunning = false; // Kill background thread safely from Pause screen
+            frame.dispose();
+            createMenu().setVisible(true);
+            return;
+        }
+
+        if (key == KeyEvent.VK_LEFT) leftPressed = true;
+        if (key == KeyEvent.VK_RIGHT) rightPressed = true;
+        if (key == KeyEvent.VK_UP) upPressed = true;
+        if (key == KeyEvent.VK_DOWN) downPressed = true;
+        if (key == KeyEvent.VK_ENTER) player2.attack(player1, "Punch");
+        if (key == KeyEvent.VK_K) player2.attack(player1, "Kick");
+    }
+
+    @Override
+    public void keyReleased(KeyEvent e) {
+        int key = e.getKeyCode();
+        if (key == KeyEvent.VK_A) aPressed = false;
+        if (key == KeyEvent.VK_D) dPressed = false;
+        if (key == KeyEvent.VK_W) wPressed = false;
+        if (key == KeyEvent.VK_S) sPressed = false;
+
+        if (key == KeyEvent.VK_LEFT) leftPressed = false;
+        if (key == KeyEvent.VK_RIGHT) rightPressed = false;
+        if (key == KeyEvent.VK_UP) upPressed = false;
+        if (key == KeyEvent.VK_DOWN) downPressed = false;
+    }
+
+    @Override public void keyTyped(KeyEvent e) {}
+
+    public static JFrame createMenu() {
+        JFrame menuFrame = new JFrame("Runtime Rumble - Main Menu");
+        menuFrame.setLayout(new BorderLayout());
+
+        JLabel titleLabel = new JLabel("Runtime Rumble", SwingConstants.CENTER);
+        titleLabel.setFont(new Font("Arial", Font.BOLD, 36));
+        menuFrame.add(titleLabel, BorderLayout.NORTH);
+
+        JPanel centerPanel = new JPanel();
+        centerPanel.setLayout(new BoxLayout(centerPanel, BoxLayout.Y_AXIS));
+        centerPanel.add(Box.createVerticalStrut(30)); // Added spacing
+
+        JLabel selectLabel = new JLabel("Select Stage:");
+        selectLabel.setFont(new Font("Arial", Font.BOLD, 18));
+        selectLabel.setAlignmentX(Component.CENTER_ALIGNMENT);
+        centerPanel.add(selectLabel);
+        
+        centerPanel.add(Box.createVerticalStrut(15)); // Added spacing
+
+        ButtonGroup group = new ButtonGroup();
+        JRadioButton dojoBtn = new JRadioButton("Dojo", true);
+        dojoBtn.setAlignmentX(Component.CENTER_ALIGNMENT);
+        JRadioButton redBtn = new JRadioButton("Red Arena");
+        redBtn.setAlignmentX(Component.CENTER_ALIGNMENT);
+        JRadioButton blueBtn = new JRadioButton("Blue Arena");
+        blueBtn.setAlignmentX(Component.CENTER_ALIGNMENT);
+        JRadioButton bestOfThreeBtn = new JRadioButton("Best of Three");
+        bestOfThreeBtn.setAlignmentX(Component.CENTER_ALIGNMENT);
+        group.add(dojoBtn);
+        group.add(redBtn);
+        group.add(blueBtn);
+        group.add(bestOfThreeBtn);
+        centerPanel.add(dojoBtn);
+        centerPanel.add(redBtn);
+        centerPanel.add(blueBtn);
+        centerPanel.add(bestOfThreeBtn);
+
+        centerPanel.add(Box.createVerticalStrut(30)); // Added spacing before button
+
+        JButton startButton = new JButton("Start Match");
+        startButton.setFont(new Font("Arial", Font.BOLD, 24));
+        startButton.setAlignmentX(Component.CENTER_ALIGNMENT);
+        startButton.addActionListener(e -> {
+            String selectedLevel;
+            if (dojoBtn.isSelected()) selectedLevel = "Dojo";
+            else if (redBtn.isSelected()) selectedLevel = "Red Arena";
+            else if (blueBtn.isSelected()) selectedLevel = "Blue Arena";
+            else selectedLevel = "Best of Three";
+            menuFrame.dispose();
+            // Start the game
+            JFrame frame = new JFrame("Java Street Fighter");
+            Game game = new Game(selectedLevel);
+            game.setFrame(frame);
+            frame.add(game);
+            frame.pack();
+            frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+            frame.setExtendedState(JFrame.MAXIMIZED_BOTH);
+            frame.setLocationRelativeTo(null);
+            frame.setVisible(true);
+            game.startGame();
+        });
+        centerPanel.add(startButton);
+
+        menuFrame.add(centerPanel, BorderLayout.CENTER);
+
+        menuFrame.setSize(400, 300);
+        menuFrame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        menuFrame.setExtendedState(JFrame.MAXIMIZED_BOTH);
+        menuFrame.setLocationRelativeTo(null);
+        return menuFrame;
+    }
+
+    public static void main(String[] args) {
+        createMenu().setVisible(true);
+    }
+}
+
+// ==========================================
+// REQUIRED HELPER CLASSES
+// ==========================================
+
+class Player {
+    private int health;
+    private int speed;
+    private int xPosition;
+    private int yPosition;
+    private int width;
+    private int height;
+    private String spritePath; 
+    private boolean isFacingRight; 
+    private boolean isBlocking;
+
+    private int velocityY = 0;
+    private boolean isJumping = false;
+    private boolean isAttacking = false;
+    private int attackTimer = 0;
+    private int kickCooldown = 0;
+    private boolean soundPlayed = false;
+    private final int JUMP_STRENGTH = -16;
+    private final int GRAVITY = 1;
+    private final int ATTACK_DURATION = 12;
+    private final int PUNCH_DAMAGE = 10;
+    private final int KICK_DAMAGE = 15;
+    private final int PUNCH_RANGE = 70;
+    private final int KICK_RANGE = 140;
+    private final int PUNCH_KNOCKBACK = 30;
+
+    public Player(int health, int speed, int x, int y, int w, int h, String spritePath, boolean facingRight) {
+        this.health = health;
+        this.speed = speed;
+        this.xPosition = x;
+        this.yPosition = y;
+        this.width = w;
+        this.height = h;
+        this.spritePath = spritePath;
+        this.isFacingRight = facingRight;
+        this.soundPlayed = false;
+    }
+
+    public void move(int deltaX, int deltaY) {
+        if (!isBlocking) {
+            xPosition += deltaX;
+            yPosition += deltaY;
+        }
+    }
+
+    public void jump() {
+        if (!isJumping && !isBlocking) {
+            velocityY = JUMP_STRENGTH;
+            isJumping = true;
+            Game.playJumpSound();
+        }
+    }
+
+    public void crouch() {
+        isBlocking = true;
+    }
+
+    public void stopCrouch() {
+        isBlocking = false;
+    }
+
+    public void attack(Player opponent, String attackType) {
+        if (isAttacking || isBlocking || !isAlive()) return;
+        if (attackType.equals("Kick") && kickCooldown > 0) return;
+        
+        isAttacking = true;
+        attackTimer = ATTACK_DURATION;
+        soundPlayed = false;
+
+        if (attackType.equals("Kick")) {
+            kickCooldown = 120; // two seconds at ~60 FPS
+        }
+
+        int attackRange = attackType.equals("Kick") ? KICK_RANGE : PUNCH_RANGE;
+        int verticalRange = 80;
+
+        if (Math.abs(this.xPosition - opponent.getXPosition()) < attackRange && 
+            Math.abs(this.yPosition - opponent.getYPosition()) < verticalRange) {
+            
+            int damage;
+            if (attackType.equals("Punch")) damage = PUNCH_DAMAGE;
+            else if (attackType.equals("Kick")) damage = KICK_DAMAGE;
+            else damage = 0;
+
+            opponent.takeDamage(damage);
+            opponent.move(this.isFacingRight ? PUNCH_KNOCKBACK : -PUNCH_KNOCKBACK, 0);
+        }
+    }
+
+    public void takeDamage(int damageAmount) {
+        if (isBlocking) {
+            health -= (damageAmount / 2); 
+        } else {
+            health -= damageAmount;
+        }
+    }
+
+    public boolean isAlive() { 
+        return health > 0; 
+    }
+
+    public void updatePhysics(int floorY, int screenWidth) {
+        yPosition += velocityY;
+        if (yPosition + height < floorY) {
+            velocityY += GRAVITY;
+        } else {
+            yPosition = floorY - height;
+            velocityY = 0;
+            isJumping = false;
+        }
+
+        if (xPosition < 0) xPosition = 0;
+        if (xPosition > screenWidth - width) xPosition = screenWidth - width;
+    }
+
+    public void updateAttackTimer() {
+        if (attackTimer > 0) {
+            // Play punch sound at the midpoint of attack animation
+            if (attackTimer == ATTACK_DURATION / 2 && !soundPlayed) {
+                Game.playPunchSound();
+                soundPlayed = true;
+            }
+            attackTimer--;
+        } else {
+            isAttacking = false;
+        }
+
+        if (kickCooldown > 0) kickCooldown--;
+    }
+
+    public void draw(Graphics g) {
+        g.setColor(spritePath.equals("RED") ? Color.RED : Color.BLUE);
+        
+        if (isBlocking) {
+            g.fillRect(xPosition, yPosition + 20, width, height - 20);
+        } else {
+            g.fillRect(xPosition, yPosition, width, height);
+        }
+
+        if (isAttacking) {
+            g.setColor(Color.YELLOW);
+            if (isFacingRight) {
+                g.fillRect(xPosition + width, yPosition + 20, 35, 15);
+            } else {
+                g.fillRect(xPosition - 35, yPosition + 20, 35, 15);
+            }
+        }
+    }
+
+    public int getHealth() { return health; }
+    public int getSpeed() { return speed; }
+    public int getXPosition() { return xPosition; }
+    public int getYPosition() { return yPosition; }
+    public void setFacingRight(boolean b) { isFacingRight = b; }
+}
+
+class Level {
+    private String levelName;
+    private int groundLevelY;
+
+    public Level(String levelName, int groundLevelY) {
+        this.levelName = levelName;
+        this.groundLevelY = groundLevelY;
+    }
+
+    public int getGroundLevelY() {
+        return groundLevelY;
+    }
+}
+
+class Item {
+    private String itemType; 
+    private int xPosition;
+    private int yPosition;
+    private boolean isCollected;
+
+    public void spawn(int spawnX, int spawnY) {
+        this.xPosition = spawnX;
+        this.yPosition = spawnY;
+        this.isCollected = false;
+    }
+}
